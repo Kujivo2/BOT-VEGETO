@@ -72,6 +72,52 @@ const moderationCommands = [
         .setMaxLength(512)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName("mute")
+    .setDescription("Mettre un membre en timeout")
+    .addUserOption((option) =>
+      option
+        .setName("utilisateur")
+        .setDescription("Utilisateur a mettre en timeout")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("duree")
+        .setDescription("Duree du timeout: 10m, 1h, 1j ou 7j")
+        .setRequired(true)
+        .addChoices(
+          { name: "10 minutes", value: "10m" },
+          { name: "1 heure", value: "1h" },
+          { name: "1 jour", value: "1j" },
+          { name: "7 jours", value: "7j" }
+        )
+    )
+    .addStringOption((option) =>
+      option
+        .setName("raison")
+        .setDescription("Raison du timeout")
+        .setMaxLength(512)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName("unmute")
+    .setDescription("Retirer le timeout d'un membre")
+    .addUserOption((option) =>
+      option
+        .setName("utilisateur")
+        .setDescription("Utilisateur a demute")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("raison")
+        .setDescription("Raison du retrait de timeout")
+        .setMaxLength(512)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false)
 ];
 
@@ -180,6 +226,28 @@ function pushModerationLog(type, guild, targetUser, moderatorUser, reason) {
   eventLogs.splice(MAX_LOGS);
 }
 
+function parseTimeoutDuration(value) {
+  const durations = {
+    "10m": 10 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "1j": 24 * 60 * 60 * 1000,
+    "7j": 7 * 24 * 60 * 60 * 1000
+  };
+
+  return durations[value] || null;
+}
+
+function formatTimeoutDuration(value) {
+  const labels = {
+    "10m": "10 minutes",
+    "1h": "1 heure",
+    "1j": "1 jour",
+    "7j": "7 jours"
+  };
+
+  return labels[value] || value;
+}
+
 async function readConfig() {
   try {
     const rawConfig = await fs.readFile(CONFIG_PATH, "utf8");
@@ -223,7 +291,9 @@ async function sendModerationLog(guild, type, targetUser, moderatorUser, reason)
   const labels = {
     ban: "Bannissement",
     unban: "Debannissement",
-    kick: "Expulsion"
+    kick: "Expulsion",
+    mute: "Timeout",
+    unmute: "Retrait timeout"
   };
 
   const embed = new EmbedBuilder()
@@ -237,6 +307,32 @@ async function sendModerationLog(guild, type, targetUser, moderatorUser, reason)
     .setTimestamp();
 
   await channel.send({ embeds: [embed] });
+}
+
+function buildModerationConfirmationEmbed(type, targetUser, moderatorUser, reason, durationLabel) {
+  const labels = {
+    ban: "Bannissement",
+    unban: "Debannissement",
+    kick: "Expulsion",
+    mute: "Timeout",
+    unmute: "Retrait timeout"
+  };
+
+  const embed = new EmbedBuilder()
+    .setColor(type === "unban" || type === "unmute" ? "#34d399" : "#fb7185")
+    .setTitle(labels[type] || "Moderation")
+    .addFields(
+      { name: "Utilisateur", value: `${targetUser.tag} (${targetUser.id})`, inline: false },
+      { name: "Moderateur", value: `${moderatorUser.tag} (${moderatorUser.id})`, inline: false },
+      { name: "Raison", value: reason, inline: false }
+    )
+    .setTimestamp();
+
+  if (durationLabel) {
+    embed.addFields({ name: "Duree", value: durationLabel, inline: false });
+  }
+
+  return embed;
 }
 
 async function sendMemberEmbed(member, type) {
@@ -291,6 +387,10 @@ function canModerateMember(interaction, member, action) {
 
   if (action === "kick" && !member.kickable) {
     return "Je n'ai pas la permission d'expulser cet utilisateur.";
+  }
+
+  if ((action === "mute" || action === "unmute") && !member.moderatable) {
+    return "Je n'ai pas la permission de gerer le timeout de cet utilisateur.";
   }
 
   return null;
@@ -361,6 +461,61 @@ async function executeUnban(interaction) {
   await interaction.reply(`Unban: ${ban.user.tag} a ete debanni.\nRaison : ${reason}`);
 }
 
+async function executeMute(interaction) {
+  const user = interaction.options.getUser("utilisateur");
+  const durationValue = interaction.options.getString("duree");
+  const durationMs = parseTimeoutDuration(durationValue);
+  const durationLabel = formatTimeoutDuration(durationValue);
+  const reason = interaction.options.getString("raison") || "Aucune raison";
+  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+  const error = canModerateMember(interaction, member, "mute");
+
+  if (error) {
+    await replyError(interaction, error);
+    return;
+  }
+
+  if (!durationMs) {
+    await replyError(interaction, "Duree invalide. Utilise 10m, 1h, 1j ou 7j.");
+    return;
+  }
+
+  const communicationDisabledUntil = new Date(Date.now() + durationMs);
+  await member.edit({ communicationDisabledUntil, reason });
+
+  const logReason = `${reason} | Duree: ${durationLabel}`;
+  pushModerationLog("mute", interaction.guild, user, interaction.user, logReason);
+  await sendModerationLog(interaction.guild, "mute", user, interaction.user, logReason);
+
+  await interaction.reply({
+    embeds: [
+      buildModerationConfirmationEmbed("mute", user, interaction.user, reason, durationLabel)
+    ]
+  });
+}
+
+async function executeUnmute(interaction) {
+  const user = interaction.options.getUser("utilisateur");
+  const reason = interaction.options.getString("raison") || "Aucune raison";
+  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+  const error = canModerateMember(interaction, member, "unmute");
+
+  if (error) {
+    await replyError(interaction, error);
+    return;
+  }
+
+  await member.edit({ communicationDisabledUntil: null, reason });
+  pushModerationLog("unmute", interaction.guild, user, interaction.user, reason);
+  await sendModerationLog(interaction.guild, "unmute", user, interaction.user, reason);
+
+  await interaction.reply({
+    embeds: [
+      buildModerationConfirmationEmbed("unmute", user, interaction.user, reason)
+    ]
+  });
+}
+
 async function handleModerationCommand(interaction) {
   if (!interaction.inGuild()) {
     await replyError(interaction, "Cette commande fonctionne seulement dans un serveur.");
@@ -379,6 +534,16 @@ async function handleModerationCommand(interaction) {
 
   if (interaction.commandName === "kick") {
     await executeKick(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "mute") {
+    await executeMute(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "unmute") {
+    await executeUnmute(interaction);
   }
 }
 
@@ -430,7 +595,7 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  if (!["ban", "unban", "kick"].includes(interaction.commandName)) return;
+  if (!["ban", "unban", "kick", "mute", "unmute"].includes(interaction.commandName)) return;
 
   try {
     await handleModerationCommand(interaction);

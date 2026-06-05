@@ -111,7 +111,9 @@ function getLogLabel(type) {
     leave: "Leave",
     ban: "Ban",
     unban: "Unban",
-    kick: "Kick"
+    kick: "Kick",
+    mute: "Timeout",
+    unmute: "Unmute"
   };
 
   return labels[type] || type;

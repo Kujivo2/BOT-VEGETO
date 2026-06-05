@@ -405,12 +405,14 @@ button.secondary {
 }
 
 .log-type.ban,
-.log-type.kick {
+.log-type.kick,
+.log-type.mute {
   background: rgba(251, 113, 133, 0.12);
   color: var(--red);
 }
 
-.log-type.unban {
+.log-type.unban,
+.log-type.unmute {
   background: rgba(52, 211, 153, 0.12);
   color: var(--green);
 }
