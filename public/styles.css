@@ -404,6 +404,17 @@ button.secondary {
   color: var(--red);
 }
 
+.log-type.ban,
+.log-type.kick {
+  background: rgba(251, 113, 133, 0.12);
+  color: var(--red);
+}
+
+.log-type.unban {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--green);
+}
+
 .empty {
   margin-bottom: 0;
   color: var(--muted);

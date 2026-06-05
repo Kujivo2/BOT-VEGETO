@@ -105,6 +105,18 @@ function showNotice(message, isError = false) {
   }
 }
 
+function getLogLabel(type) {
+  const labels = {
+    join: "Join",
+    leave: "Leave",
+    ban: "Ban",
+    unban: "Unban",
+    kick: "Kick"
+  };
+
+  return labels[type] || type;
+}
+
 async function loadConfig() {
   const response = await fetch("/api/config");
   const config = await response.json();
@@ -144,7 +156,7 @@ async function loadLogs() {
   const logs = await response.json();
 
   if (!logs.length) {
-    logsList.innerHTML = '<p class="empty">Aucun join/leave pour le moment.</p>';
+    logsList.innerHTML = '<p class="empty">Aucune activite pour le moment.</p>';
     return;
   }
 
@@ -155,13 +167,17 @@ async function loadLogs() {
       day: "2-digit",
       month: "2-digit"
     });
-    const label = log.type === "join" ? "Join" : "Leave";
+    const label = getLogLabel(log.type);
+    const details = log.reason
+      ? `${date} - ${log.guildName} - ${log.reason}`
+      : `${date} - ${log.guildName}`;
+
     return `
       <article class="log-item">
         <span class="log-type ${log.type}">${label}</span>
         <div>
           <strong>${log.username}</strong>
-          <p>${date} - ${log.guildName}</p>
+          <p>${details}</p>
         </div>
       </article>
     `;
